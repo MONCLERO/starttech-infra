@@ -1,0 +1,25 @@
+
+# Excludes Terraform state, credentials & sensitive files
+.terraform/
+/terraform/tfplan
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+
+
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
