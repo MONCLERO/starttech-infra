@@ -1,18 +1,24 @@
 
-# ----- A - ZONES ----- #
+# ----- AVAILABILITY ZONES ----- #
 
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
 locals {
+  availability_zones = slice(
+    data.aws_availability_zones.available.names,
+    0,
+    2
+  )
+
   common_tags = {
     Project   = var.project_name
     ManagedBy = "Terraform"
   }
 }
 
-# ----- VIRTUAL PRIVATE CLOUD & IGW ----- #
+# ----- VIRTUAL PRIVATE CLOUD ----- #
 
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -24,6 +30,8 @@ resource "aws_vpc" "main" {
   })
 }
 
+# ----- INTERNET GATEWAY ----- #
+
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
@@ -32,14 +40,14 @@ resource "aws_internet_gateway" "main" {
   })
 }
 
-# ----- SUBNETS ----- #
+# ----- PUBLIC SUBNETS ----- #
 
 resource "aws_subnet" "public" {
   count = length(var.public_subnet_cidrs)
 
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnet_cidrs[count.index]
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  availability_zone       = local.availability_zones[count.index]
   map_public_ip_on_launch = true
 
   tags = merge(local.common_tags, {
@@ -49,12 +57,14 @@ resource "aws_subnet" "public" {
   })
 }
 
+# ----- PRIVATE SUBNETS ----- #
+
 resource "aws_subnet" "private" {
   count = length(var.private_subnet_cidrs)
 
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnet_cidrs[count.index]
-  availability_zone = data.aws_availability_zones.available.names[count.index]
+  availability_zone = local.availability_zones[count.index]
 
   tags = merge(local.common_tags, {
     Name                                        = "${var.project_name}-private-${count.index + 1}"
@@ -63,7 +73,7 @@ resource "aws_subnet" "private" {
   })
 }
 
-# ----- NAT & EIP ----- #
+# ----- NAT ELASTIC IP ADDRESSES ----- #
 
 resource "aws_eip" "nat" {
   count  = length(var.public_subnet_cidrs)
@@ -74,20 +84,22 @@ resource "aws_eip" "nat" {
   })
 }
 
+# ----- NAT GATEWAYS ----- #
+
 resource "aws_nat_gateway" "main" {
   count = length(var.public_subnet_cidrs)
 
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
 
+  depends_on = [aws_internet_gateway.main]
+
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-nat-${count.index + 1}"
   })
-
-  depends_on = [aws_internet_gateway.main]
 }
 
-# ----- ROUTE TABLES & ASSOCIATIONS ----- #
+# ----- PUBLIC ROUTE TABLE ----- #
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
@@ -102,12 +114,16 @@ resource "aws_route_table" "public" {
   })
 }
 
+# ----- PUBLIC ROUTE TABLE ASSOCIATIONS ----- #
+
 resource "aws_route_table_association" "public" {
   count = length(aws_subnet.public)
 
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
+
+# ----- PRIVATE ROUTE TABLES ----- #
 
 resource "aws_route_table" "private" {
   count  = length(aws_subnet.private)
@@ -122,6 +138,8 @@ resource "aws_route_table" "private" {
     Name = "${var.project_name}-private-rt-${count.index + 1}"
   })
 }
+
+# ----- PRIVATE ROUTE TABLE ASSOCIATIONS ----- #
 
 resource "aws_route_table_association" "private" {
   count = length(aws_subnet.private)

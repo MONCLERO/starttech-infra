@@ -1,23 +1,32 @@
 
-# ----- UNIQUE ID FOR BUCKET NAMING ----- #
+# ----- AWS ACCOUNT ID ----- #
 
 data "aws_caller_identity" "current" {}
 
+# ----- RESOURCE NAMING ----- #
+
 locals {
   bucket_name = "${var.frontend_bucket_prefix}-${data.aws_caller_identity.current.account_id}"
-}
 
-# Private S3 bucket for the React frontend
-
-resource "aws_s3_bucket" "frontend" {
-  bucket = local.bucket_name
-
-  tags = {
-    Name      = local.bucket_name
+  common_tags = {
     Project   = var.project_name
     ManagedBy = "Terraform"
   }
 }
+
+# ==================================================
+# S3 FRONTEND BUCKET
+# ==================================================
+
+resource "aws_s3_bucket" "frontend" {
+  bucket = local.bucket_name
+
+  tags = merge(local.common_tags, {
+    Name = local.bucket_name
+  })
+}
+
+# ----- S3 VERSIONING ----- #
 
 resource "aws_s3_bucket_versioning" "frontend" {
   bucket = aws_s3_bucket.frontend.id
@@ -26,6 +35,8 @@ resource "aws_s3_bucket_versioning" "frontend" {
     status = "Enabled"
   }
 }
+
+# ----- S3 SERVER-SIDE ENCRYPTION ----- #
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
   bucket = aws_s3_bucket.frontend.id
@@ -37,6 +48,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
   }
 }
 
+# ----- S3 PUBLIC ACCESS BLOCK ----- #
+
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
@@ -46,6 +59,8 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   restrict_public_buckets = true
 }
 
+# ----- S3 OBJECT OWNERSHIP ----- #
+
 resource "aws_s3_bucket_ownership_controls" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
@@ -54,43 +69,50 @@ resource "aws_s3_bucket_ownership_controls" "frontend" {
   }
 }
 
-# ECR repository for the Go backend Docker image
+# ==================================================
+# ECR BACKEND REPOSITORY
+# ==================================================
 
 resource "aws_ecr_repository" "backend" {
   name                 = var.ecr_repository_name
   image_tag_mutability = "MUTABLE"
 
+  # Scan images automatically when they are pushed.
   image_scanning_configuration {
     scan_on_push = true
   }
 
+  # Encrypt repository images at rest.
   encryption_configuration {
     encryption_type = "AES256"
   }
 
-  tags = {
-    Name      = var.ecr_repository_name
-    Project   = var.project_name
-    ManagedBy = "Terraform"
-  }
+  tags = merge(local.common_tags, {
+    Name = var.ecr_repository_name
+  })
 }
 
-# Retain only the latest 10 images
+# ----- ECR IMAGE LIFECYCLE POLICY ----- #
+
 resource "aws_ecr_lifecycle_policy" "backend" {
   repository = aws_ecr_repository.backend.name
 
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the latest 10 images"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 10
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Retain only the latest 10 images"
+
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 10
+        }
+
+        action = {
+          type = "expire"
+        }
       }
-      action = {
-        type = "expire"
-      }
-    }]
+    ]
   })
 }
