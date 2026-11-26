@@ -114,37 +114,7 @@ resource "aws_eks_node_group" "main" {
   }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-resource "aws_eks_access_entry" "github_actions" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = var.github_actions_role_arn
-  type          = "STANDARD"
-}
-
-resource "aws_eks_access_policy_association" "github_actions" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = aws_eks_access_entry.github_actions.principal_arn
-
-  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-
-  access_scope {
-    type = "cluster"
-  }
-}
-
+# ----- EKS OIDC PROVIDER ----- #
 
 resource "aws_iam_openid_connect_provider" "eks" {
   url = aws_eks_cluster.main.identity[0].oidc[0].issuer
@@ -160,6 +130,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
   }
 }
 
+# ----- LOAD BALANCER IAM CONTROLLER POLICY ----- #
 
 resource "aws_iam_policy" "load_balancer_controller" {
   name        = "${var.cluster_name}-load-balancer-controller-policy"
@@ -168,6 +139,7 @@ resource "aws_iam_policy" "load_balancer_controller" {
   policy = file("${path.module}/iam_policy.json")
 }
 
+# ----- LOAD BALANCER CONTROLLER IRSA ----- #
 
 data "aws_iam_policy_document" "load_balancer_controller" {
   statement {
@@ -195,6 +167,8 @@ data "aws_iam_policy_document" "load_balancer_controller" {
     }
   }
 }
+
+# ----- IAM ROLE FOR LOAD BALANCER CONTROLLER ----- #
 
 resource "aws_iam_role" "load_balancer_controller" {
   name               = "${var.cluster_name}-load-balancer-controller-role"

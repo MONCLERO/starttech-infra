@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "aws_profile" {
   description = "AWS CLI profile"
   type        = string
-  default     = "starttech-devops"
+  default     = ""
 }
 
 variable "project_name" {
@@ -20,6 +20,31 @@ variable "cluster_name" {
   description = "EKS cluster name"
   type        = string
   default     = "starttech-cluster"
+}
+
+variable "cluster_version" {
+  type    = string
+  default = "1.35"
+}
+
+variable "node_instance_types" {
+  type    = list(string)
+  default = ["t3.medium"]
+}
+
+variable "node_desired_size" {
+  type    = number
+  default = 2
+}
+
+variable "node_min_size" {
+  type    = number
+  default = 2
+}
+
+variable "node_max_size" {
+  type    = number
+  default = 3
 }
 
 variable "vpc_cidr" {
@@ -48,4 +73,14 @@ variable "backend_origin_domain_name" {
   description = "DNS hostname of the Kubernetes Ingress ALB"
   type        = string
   default     = ""
+}
+
+variable "frontend_bucket_prefix" {
+  type    = string
+  default = "starttech-frontend-bucket"
+}
+
+variable "ecr_repository_name" {
+  type    = string
+  default = "starttech-backend-api"
 }

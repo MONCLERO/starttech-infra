@@ -8,8 +8,7 @@ variable "cluster_name" {
 }
 
 variable "cluster_version" {
-  type    = string
-  default = "1.35"
+  type = string
 }
 
 variable "private_subnet_ids" {
@@ -34,8 +33,4 @@ variable "node_min_size" {
 variable "node_max_size" {
   type    = number
   default = 3
-}
-
-variable "github_actions_role_arn" {
-  type = string
 }

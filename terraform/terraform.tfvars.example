@@ -1,0 +1,4 @@
+aws_region = "preferred region"
+aws_profile = "your sso profile"
+
+enable_cdn = false
