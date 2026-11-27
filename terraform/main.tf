@@ -10,6 +10,8 @@ terraform {
       version = ">= 5.80, < 7.0"
     }
   }
+
+  backend "s3" {}
 }
 
 
