@@ -12,9 +12,10 @@ TERRAFORM_DIR="$PROJECT_ROOT/terraform"
 
 AWS_PROFILE="${AWS_PROFILE:-}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-
-# Pin the controller chart version.
 CHART_VERSION="3.6.3"
+
+export AWS_REGION
+export AWS_DEFAULT_REGION="$AWS_REGION"
 
 TF_AUTH_ARGS=()
 
@@ -30,8 +31,6 @@ else
     echo "Using AWS profile: $AWS_PROFILE"
 fi
 
-export AWS_REGION
-
 # ----- CHECK REQUIRED TOOLS ----- #
 
 for tool in terraform aws kubectl helm; do
@@ -42,35 +41,102 @@ for tool in terraform aws kubectl helm; do
 done
 
 echo "======================================"
-echo " StartTech Infrastructure Preparation"
+echo " StartTech Infrastructure Deployment"
 echo "======================================"
+
+# ----- VERIFY AWS IDENTITY ----- #
+
+echo "[1/7] Verifying AWS identity..."
+aws sts get-caller-identity
+
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+STATE_BUCKET="starttech-terraform-state-${ACCOUNT_ID}"
+
+echo "AWS Account: $ACCOUNT_ID"
+echo "Terraform State Bucket: $STATE_BUCKET"
+
+# ----- BOOTSTRAP TERRAFORM STATE BUCKET ----- #
+
+echo "[2/7] Checking Terraform state bucket..."
+
+if aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null; then
+    echo "Terraform state bucket already exists."
+else
+    echo "Creating Terraform state bucket..."
+
+    CREATE_BUCKET_ARGS=(--bucket "$STATE_BUCKET")
+
+    if [[ "$AWS_REGION" != "us-east-1" ]]; then
+        CREATE_BUCKET_ARGS+=(--create-bucket-configuration "LocationConstraint=$AWS_REGION")
+    fi
+
+    aws s3api create-bucket "${CREATE_BUCKET_ARGS[@]}"
+
+    aws s3api wait bucket-exists --bucket "$STATE_BUCKET"
+
+    echo "Terraform state bucket created."
+fi
+
+# Enable versioning.
+aws s3api put-bucket-versioning \
+    --bucket "$STATE_BUCKET" \
+    --versioning-configuration Status=Enabled
+
+# Enable server-side encryption.
+aws s3api put-bucket-encryption \
+    --bucket "$STATE_BUCKET" \
+    --server-side-encryption-configuration \
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+# Block all public access.
+aws s3api put-public-access-block \
+    --bucket "$STATE_BUCKET" \
+    --public-access-block-configuration \
+    BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+# Enforce bucket-owner ownership.
+aws s3api put-bucket-ownership-controls \
+    --bucket "$STATE_BUCKET" \
+    --ownership-controls 'Rules=[{ObjectOwnership=BucketOwnerEnforced}]'
+
+echo "Terraform state bucket is secured."
 
 # ----- TERRAFORM PREPARATION ----- #
 
-echo "[1/6] Formatting Terraform files..."
+echo "[3/7] Formatting Terraform files..."
 terraform -chdir="$TERRAFORM_DIR" fmt -recursive
 
-echo "[2/6] Initializing Terraform..."
-terraform -chdir="$TERRAFORM_DIR" init
+echo "[4/7] Initializing Terraform with S3 remote state..."
 
-echo "[3/6] Validating Terraform configuration..."
+terraform -chdir="$TERRAFORM_DIR" init -reconfigure \
+    -backend-config="bucket=$STATE_BUCKET" \
+    -backend-config="key=starttech/terraform.tfstate" \
+    -backend-config="region=$AWS_REGION" \
+    -backend-config="encrypt=true" \
+    -backend-config="use_lockfile=true"
+
+echo "[5/7] Validating Terraform configuration..."
 terraform -chdir="$TERRAFORM_DIR" validate
 
-echo "[4/6] Generating infrastructure plan..."
-terraform -chdir="$TERRAFORM_DIR" plan "${TF_AUTH_ARGS[@]}" -out=tfplan
+# ----- PLAN AND APPLY ----- #
 
-# ----- APPLY INFRASTRUCTURE ----- #
+echo "[6/7] Generating infrastructure plan..."
 
-echo "[5/6] Applying infrastructure plan..."
+terraform -chdir="$TERRAFORM_DIR" plan \
+    "${TF_AUTH_ARGS[@]}" \
+    -out=tfplan
+
+echo "Applying infrastructure plan..."
+
 terraform -chdir="$TERRAFORM_DIR" apply -auto-approve tfplan
 
 rm -f "$TERRAFORM_DIR/tfplan"
 
-echo "Infrastructure deployment completed successfully."
+echo "Terraform infrastructure deployment completed."
 
 # ----- INSTALL AWS LOAD BALANCER CONTROLLER ----- #
 
-echo "[6/6] Preparing AWS Load Balancer Controller installation..."
+echo "[7/7] Installing AWS Load Balancer Controller..."
 
 # Retrieve Terraform outputs.
 CLUSTER_NAME="$(terraform -chdir="$TERRAFORM_DIR" output -raw eks_cluster_name)"
@@ -85,28 +151,20 @@ fi
 echo "Cluster: $CLUSTER_NAME"
 echo "Region: $AWS_REGION"
 
-# ----- VERIFY AWS IDENTITY ----- #
-
-aws sts get-caller-identity
-
-# ----- CONFIGURE KUBECTL ----- #
-
+# Configure kubectl.
 aws eks update-kubeconfig \
     --region "$AWS_REGION" \
     --name "$CLUSTER_NAME"
 
-# ----- CONFIGURE HELM REPOSITORY ----- #
-
+# Configure Helm repository.
 helm repo add eks https://aws.github.io/eks-charts --force-update
 helm repo update eks
 
-# ----- INSTALL / UPDATE CRDs ----- #
-
+# Install/update controller CRDs.
 kubectl apply -f \
     https://raw.githubusercontent.com/aws/eks-charts/master/stable/aws-load-balancer-controller/crds/crds.yaml
 
-# ----- INSTALL / UPGRADE CONTROLLER ----- #
-
+# Install/upgrade controller.
 helm upgrade --install aws-load-balancer-controller \
     eks/aws-load-balancer-controller \
     --namespace kube-system \
@@ -120,8 +178,7 @@ helm upgrade --install aws-load-balancer-controller \
     --set serviceAccount.name=aws-load-balancer-controller \
     --set-string 'serviceAccount.annotations.eks\.amazonaws\.com/role-arn='"$ROLE_ARN"
 
-# ----- VERIFY INSTALLATION ----- #
-
+# Verify controller rollout.
 kubectl rollout status deployment/aws-load-balancer-controller \
     --namespace kube-system \
     --timeout=300s
