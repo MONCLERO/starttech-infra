@@ -184,3 +184,24 @@ resource "aws_iam_role_policy_attachment" "load_balancer_controller" {
   role       = aws_iam_role.load_balancer_controller.name
   policy_arn = aws_iam_policy.load_balancer_controller.arn
 }
+
+# ----- GITHUB ACTIONS EKS ACCESS ENTRY ----- #
+
+resource "aws_eks_access_entry" "github_actions" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.github_actions_user_arn
+  type          = "STANDARD"
+}
+
+# ----- GITHUB ACTIONS EKS ACCESS POLICY ----- #
+
+resource "aws_eks_access_policy_association" "github_actions" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_eks_access_entry.github_actions.principal_arn
+
+  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}

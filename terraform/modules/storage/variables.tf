@@ -1,7 +1,7 @@
 
 variable "project_name" {
   description = "Project identifier used for resource tagging."
-  type = string
+  type        = string
 }
 
 variable "frontend_bucket_prefix" {

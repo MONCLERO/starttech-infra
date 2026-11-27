@@ -14,6 +14,7 @@ terraform {
   backend "s3" {}
 }
 
+data "aws_caller_identity" "current" {}
 
 provider "aws" {
   region  = var.aws_region
@@ -52,6 +53,8 @@ module "eks" {
   node_desired_size   = var.node_desired_size
   node_min_size       = var.node_min_size
   node_max_size       = var.node_max_size
+
+  github_actions_user_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/starttech-github-actions"
 }
 
 
