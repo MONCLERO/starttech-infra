@@ -17,6 +17,8 @@ CHART_VERSION="3.6.3"
 export AWS_REGION
 export AWS_DEFAULT_REGION="$AWS_REGION"
 
+export TF_VAR_aws_region="$AWS_REGION"
+
 TF_AUTH_ARGS=()
 
 # Use local SSO profile only when static credentials are not supplied.
